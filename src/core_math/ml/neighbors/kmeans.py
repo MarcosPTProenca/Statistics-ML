@@ -2,7 +2,7 @@ import random
 from typing import Literal, Callable, Iterable
 import math
 import numpy as np
-from libs.core_math.ml.distances import squared_euclidean_distance, \
+from ..distances import squared_euclidean_distance, \
                                         cosine_distance, \
                                         manhattan_distance, \
                                         euclidean_distance
@@ -104,8 +104,8 @@ class KMeans:
             where D(x) is the distance from x to the nearest centroid.
         """
 
-        n_samples = X.shape[0]
-        k = self.n_clusters
+        n_samples: int = X.shape[0]
+        k: int = self.n_clusters
         
         if self.init == "random":
             
@@ -155,12 +155,16 @@ class KMeans:
                         next_idx = i
                         break
                 
+                if next_idx is None:
+                    remaining = [i for i in range(n_samples) if i not in chosen_indices]
+                    next_idx = random.choice(remaining)
+
                 chosen_indices.add(next_idx)
                 centroids.append(X[next_idx])
 
             return centroids
 
-    def _assign_clusters(self, X, centroids):
+    def _assign_clusters(self, X: np.ndarray, centroids: np.ndarray) -> np.ndarray:
         """
         Assignment step.
 
@@ -171,9 +175,24 @@ class KMeans:
         Produces the label vector:
             labels ∈ {0, ..., k-1}
         """
-        pass
+        n_samples: int = X.shape[0]
+        k: int = centroids.shape[0]
+        labels = np.ones(n_samples, dtype=int) * (-1) 
+        
+        for i in range(n_samples):
+            d_min = float("inf")
 
-    def _update_centroids(self, X, labels):
+            for j in range(k):
+
+                d = self._distance_fn(X[i], centroids[j])
+
+                if d < d_min:
+                    d_min = d
+                    labels[i] = int(j)
+
+        return labels            
+
+    def _update_centroids(self, X: np.ndarray, labels: np.ndarray) -> np.ndarray:
         """
         Update step.
 
@@ -183,9 +202,31 @@ class KMeans:
 
         Handle empty clusters appropriately.
         """
-        pass
+        n_samples: int = X.shape[0]
+        n_features: int = X.shape[1]
+        k: int = self.n_clusters
+        new_centroids = np.zeros((k, n_features))
+        counts = np.zeros(k, dtype=int)
 
-    def _compute_inertia(self, X, centroids, labels):
+        for i in range(n_samples):
+
+            cluster = int(labels[i])
+
+            new_centroids[cluster] += X[i]
+            counts[cluster] += 1
+        
+        for cluster in range(k):
+
+            if counts[cluster] == 0:
+                random_x = random.randint(0, n_samples-1)
+                new_centroids[cluster] = X[random_x]
+
+            else:
+                new_centroids[cluster] = new_centroids[cluster]/counts[cluster]
+        
+        return new_centroids
+
+    def _compute_inertia(self, X: np.ndarray, centroids: np.ndarray, labels: np.ndarray) -> float:
         """
         Compute the objective function (WCSS):
 
@@ -193,17 +234,34 @@ class KMeans:
 
         Used to select the best run among n_init trials.
         """
-        pass
+        n_samples: int = X.shape[0]
+        error: float = 0.0
 
-    def _has_converged(self, old_centroids, new_centroids):
+        for i in range(n_samples):
+
+            ci = int(labels[i])
+            centroid = centroids[ci]
+            error += self._distance_fn(X[i], centroid)
+
+        return error
+
+    def _has_converged(self, old_centroids: np.ndarray, new_centroids: np.ndarray) -> bool:
         """
         Check convergence using centroid displacement:
 
             max(|| μ_new - μ_old ||) < tol
         """
-        pass
+        k = self.n_clusters
+        max_delta = 0.0
 
-    def fit(self, X):
+        for i in range(k):
+            delta = math.sqrt(self._distance_fn(old_centroids[i], new_centroids[i]))
+            if delta > max_delta:
+                max_delta = delta
+        
+        return max_delta < self.tol
+
+    def fit(self, X: np.ndarray):
         """
         Train the K-Means model.
 
@@ -218,9 +276,51 @@ class KMeans:
 
             Keep the run with the lowest inertia.
         """
-        pass
+        if self.n_init < 1:
+            raise ValueError("n_init must be at least 1")
+        if self.max_iter < 1:
+            raise ValueError("max_iter must be at least 1")
+        if X.shape[0] < 1:
+            raise ValueError("X must have at least 1 sample")
+        if self.n_clusters > X.shape[0]:
+            raise ValueError("The number of clusters can the greater than the number of samples")
 
-    def predict(self, X):
+        best_inertia = float("inf")
+        best_n_iter = 0
+        best_centroids = None
+        best_labels = None
+
+        for _ in range(self.n_init):
+            centroids = np.asarray(self._initialize_centroids(X))
+            iterations = 0
+
+            while True:
+                labels = self._assign_clusters(X, centroids)
+                new_centroids = self._update_centroids(X, labels)
+                converge = self._has_converged(centroids, new_centroids)
+
+                iterations += 1
+
+                if converge or iterations >= self.max_iter:
+                    inertia = self._compute_inertia(X, new_centroids, labels)
+
+                    if inertia < best_inertia:
+                        best_inertia = inertia
+                        best_n_iter = iterations
+                        best_centroids = new_centroids
+                        best_labels = labels
+                    break
+
+                centroids = new_centroids
+
+        self.cluster_centers_ = np.asarray(best_centroids)
+        self.labels_ = np.asarray(best_labels, dtype=int)
+        self.inertia_ = float(best_inertia)
+        self.n_iter_ = int(best_n_iter)
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
         """
         Assign clusters to new samples.
 
@@ -229,9 +329,16 @@ class KMeans:
 
         Requires fitted centroids.
         """
-        pass
+        if self.cluster_centers_ is None:
+            raise ValueError("Model is not fitted")
+        if X.shape[0] < 1:
+            raise ValueError("X must contain at least one sample")
+        if X.shape[1] != self.cluster_centers_.shape[1]:
+            raise ValueError("The number of features is different from the number of trained features")
+        
+        return self._assign_clusters(X, self.cluster_centers_)
 
-    def fit_predict(self, X):
+    def fit_predict(self, X: np.ndarray):
         """
         Equivalent to calling:
 
@@ -240,4 +347,53 @@ class KMeans:
 
         Provided for convenience.
         """
-        pass
+
+        self.fit(X)
+
+        return self.labels_
+
+
+if __name__ == "__main__":
+
+    rng = np.random.default_rng(42)
+
+    # Criando 3 clusters bem separados
+    cluster_1 = rng.normal(loc=(0, 0), scale=0.5, size=(100, 2))
+    cluster_2 = rng.normal(loc=(5, 5), scale=0.5, size=(100, 2))
+    cluster_3 = rng.normal(loc=(10, 0), scale=0.5, size=(100, 2))
+
+    X = np.vstack([cluster_1, cluster_2, cluster_3])
+
+    kmeans = KMeans(
+        n_clusters=3,
+        init="k-means++",
+        n_init=10,
+        max_iter=300,
+        tol=1e-4,
+        random_state=42
+    )
+
+    print("Fitting model...")
+    kmeans.fit(X)
+
+    print("\nCentroids:")
+    print(kmeans.cluster_centers_)
+
+    print("\nInertia:")
+    print(kmeans.inertia_)
+
+    print("\nIterations:")
+    print(kmeans.n_iter_)
+
+    new_points = np.array([
+        [0, 0],
+        [5, 5],
+        [10, 0],
+        [8, 1]
+    ])
+
+    preds = kmeans.predict(new_points)
+
+    print("\nNew points predictions:")
+    for point, label in zip(new_points, preds):
+        print(f"Point {point} -> Cluster {label}")
