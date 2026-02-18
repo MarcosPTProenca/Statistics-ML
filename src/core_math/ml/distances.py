@@ -45,10 +45,13 @@ def cosine_distance(x: Iterable, y: Iterable) -> float:
     Returns:
         Cosine distance (float)
     """
-    return 1 - (math.fsum(xi*yi for xi, yi in zip(x,y))
-                / (math.sqrt(math.fsum(xi**2 for xi in x))
-                    * math.sqrt(math.fsum(yi**2 for yi in y))))
-
+    try:
+        return 1 - (math.fsum(xi*yi for xi, yi in zip(x,y))
+                    / (math.sqrt(math.fsum(xi**2 for xi in x))
+                        * math.sqrt(math.fsum(yi**2 for yi in y))))
+    except:
+        raise ZeroDivisionError
+    
 def manhattan_distance(x: Iterable, y: Iterable) -> float:
     """
     Compute the Manhattan distance between two vectors.
